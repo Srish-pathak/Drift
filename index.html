@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drift — a fluid playground</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #060608; }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+
+  #hint {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.35); font: 400 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: 0.12em; text-transform: uppercase; pointer-events: none;
+    transition: opacity 0.8s ease; user-select: none;
+  }
+
+  #panel {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(20,20,24,0.55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+    padding: 6px; z-index: 10;
+  }
+
+  .mode-btn {
+    appearance: none; border: none; cursor: pointer; border-radius: 11px;
+    padding: 9px 16px; font: 500 12.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: 0.02em; color: rgba(255,255,255,0.55); background: transparent;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  .mode-btn.active { background: rgba(255,255,255,0.12); color: #fff; }
+  .mode-btn:hover:not(.active) { color: rgba(255,255,255,0.85); }
+
+  .divider { width: 1px; height: 20px; background: rgba(255,255,255,0.1); margin: 0 2px; }
+
+  .icon-btn {
+    appearance: none; border: none; cursor: pointer; border-radius: 11px;
+    width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.55); background: transparent; transition: background 0.2s ease, color 0.2s ease;
+  }
+  .icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+  #label {
+    position: fixed; top: 22px; left: 24px;
+    color: rgba(255,255,255,0.3); font: 400 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: 0.14em; text-transform: uppercase; pointer-events: none; user-select: none;
+  }
+
+  #portalTypes {
+    position: fixed; bottom: 68px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 6px;
+    background: rgba(20,20,24,0.55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 13px; padding: 5px; z-index: 10;
+  }
+  #portalTypes.show { display: flex; }
+  .ptype-btn {
+    appearance: none; border: none; cursor: pointer; border-radius: 9px;
+    padding: 6px 12px; font: 500 11.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: rgba(255,255,255,0.5); background: transparent; transition: background 0.2s ease, color 0.2s ease;
+  }
+  .ptype-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="hint">touch or drag to begin</div>
+<div id="label">drift</div>
+
+<div id="portalTypes">
+  <button class="ptype-btn active" data-ptype="space">Space</button>
+  <button class="ptype-btn" data-ptype="fire">Fire</button>
+  <button class="ptype-btn" data-ptype="ocean">Ocean</button>
+  <button class="ptype-btn" data-ptype="cyber">Cyber</button>
+  <button class="ptype-btn" data-ptype="magic">Magic</button>
+</div>
+
+<div id="panel">
+  <button class="mode-btn active" data-mode="ink">Ink</button>
+  <button class="mode-btn" data-mode="fire">Fire</button>
+  <button class="mode-btn" data-mode="neon">Neon</button>
+  <button class="mode-btn" data-mode="water">Water</button>
+  <button class="mode-btn" data-mode="universe" title="Drag to draw stars. Hold to place a gravity well.">Universe</button>
+  <button class="mode-btn" data-mode="portal" title="Tap to open a portal.">Portal</button>
+  <button class="mode-btn" data-mode="rain" title="Drag to wipe the glass.">Rain</button>
+  <div class="divider"></div>
+  <button class="icon-btn" id="saveBtn" title="Save image">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+  </button>
+  <button class="icon-btn" id="clearBtn" title="Clear canvas">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+  </button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, DPR;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const PALETTES = {
+  ink:   { hues: [220, 250, 190], sat: 70, light: [45, 65], trail: 'rgba(6,6,8,0.10)', blend: 'source-over', gravity: 0.02, drag: 0.985, life: 130, spread: 1.4, size: [10, 26], additive: false },
+  fire:  { hues: [18, 34, 48],    sat: 95, light: [50, 65], trail: 'rgba(6,6,8,0.16)', blend: 'lighter',     gravity: -0.09, drag: 0.97,  life: 55,  spread: 0.8, size: [5, 14], additive: true },
+  neon:  { hues: [300, 190, 330], sat: 90, light: [55, 65], trail: 'rgba(6,6,8,0.13)', blend: 'lighter',     gravity: 0,     drag: 0.965, life: 75,  spread: 1.1, size: [4, 10], additive: true },
+  water: { hues: [200, 195, 210], sat: 65, light: [45, 60], trail: 'rgba(6,6,8,0.09)', blend: 'source-over', gravity: 0.14,  drag: 0.98,  life: 150, spread: 1.6, size: [12, 30], additive: false },
+};
+
+let mode = 'ink';
+let particles = [];
+const MAX_PARTICLES = 1400;
+
+let pointer = { x: W/2, y: H/2, px: W/2, py: H/2, down: false, vx: 0, vy: 0 };
+let hintShown = true;
+
+let uniStars = [];
+let uniWells = [];
+let uniShooting = [];
+const MAX_STARS = 260;
+
+const nebulae = Array.from({ length: 4 }, (_, i) => ({
+  xf: 0.15 + Math.random() * 0.7, yf: 0.15 + Math.random() * 0.7,
+  r: 160 + Math.random() * 180, hue: [265, 210, 300, 190][i % 4],
+  driftSpeed: 0.4 + Math.random() * 0.6, phase: Math.random() * Math.PI * 2,
+}));
+const bgStars = Array.from({ length: 170 }, () => ({
+  xf: Math.random(), yf: Math.random(), r: 0.4 + Math.random() * 1.1,
+  phase: Math.random() * Math.PI * 2, speed: 0.4 + Math.random() * 1.2,
+}));
+
+function spawnUniStar(x, y, vx, vy) {
+  const bright = Math.random() < 0.32;
+  uniStars.push({
+    x, y,
+    vx: vx * 0.15 + (Math.random() - 0.5) * 0.5,
+    vy: vy * 0.15 + (Math.random() - 0.5) * 0.5,
+    size: bright ? 1.8 + Math.random() * 1.6 : 0.7 + Math.random() * 0.9,
+    hue: 195 + Math.random() * 55,
+    bright, life: 0, maxLife: 500 + Math.random() * 500,
+    twinkle: Math.random() * Math.PI * 2,
+  });
+  if (uniStars.length > MAX_STARS) uniStars.splice(0, uniStars.length - MAX_STARS);
+}
+
+function emitUniStars(x, y) {
+  const dx = x - pointer.px, dy = y - pointer.py;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.max(1, Math.min(6, Math.floor(dist / 8)));
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    spawnUniStar(pointer.px + dx * t, pointer.py + dy * t, dx * 0.05, dy * 0.05);
+  }
+}
+
+function placeWell(x, y) {
+  uniWells.push({ x, y, strength: 46, pulse: 0, born: performance.now() });
+  if (uniWells.length > 3) uniWells.shift();
+}
+
+function spawnShootingStar() {
+  const fromTop = Math.random() < 0.5;
+  const x = fromTop ? Math.random() * W : -20;
+  const y = fromTop ? -20 : Math.random() * H * 0.6;
+  const speed = 7 + Math.random() * 5;
+  const ang = Math.PI / 4 + (Math.random() - 0.5) * 0.3;
+  uniShooting.push({ x, y, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, life: 0, maxLife: 55 });
+}
+
+const PORTAL_TYPES = {
+  space: { hues: [255, 225, 285], core: 'rgba(150,120,255,1)' },
+  fire:  { hues: [18, 34, 50],    core: 'rgba(255,140,60,1)' },
+  ocean: { hues: [190, 200, 170], core: 'rgba(60,210,200,1)' },
+  cyber: { hues: [150, 320, 195], core: 'rgba(90,255,190,1)' },
+  magic: { hues: [320, 45, 290],  core: 'rgba(255,120,220,1)' },
+};
+let currentPortalType = 'space';
+let portals = [];
+let portalBits = [];
+const MAX_PORTALS = 3;
+const MAX_PORTAL_BITS = 900;
+
+function placePortal(x, y, type) {
+  portals.push({ x, y, type, angle: 0, born: performance.now() });
+  if (portals.length > MAX_PORTALS) portals.shift();
+}
+
+function updatePortals() {
+  for (const p of portals) {
+    p.angle += 0.03;
+    const cfg = PORTAL_TYPES[p.type];
+    for (let k = 0; k < 3; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const hue = cfg.hues[Math.floor(Math.random() * cfg.hues.length)] + (Math.random() * 10 - 5);
+      portalBits.push({
+        x: p.x + Math.cos(a) * 8, y: p.y + Math.sin(a) * 8,
+        a, r: 8, spin: (Math.random() < 0.5 ? 1 : -1) * (0.05 + Math.random() * 0.05),
+        speed: 0.8 + Math.random() * 1.6, hue, life: 0, maxLife: 70 + Math.random() * 50,
+        size: 2 + Math.random() * 3.5,
+      });
+    }
+  }
+  if (portalBits.length > MAX_PORTAL_BITS) portalBits.splice(0, portalBits.length - MAX_PORTAL_BITS);
+  for (let i = portalBits.length - 1; i >= 0; i--) {
+    const b = portalBits[i];
+    b.life++;
+    if (b.life > b.maxLife) { portalBits.splice(i, 1); continue; }
+    b.a += b.spin;
+    b.r += b.speed;
+    b.x += Math.cos(b.a) * b.speed * 0.4;
+    b.y += Math.sin(b.a) * b.speed * 0.4;
+  }
+}
+
+function drawPortals() {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(6,4,14,0.14)';
+  ctx.fillRect(0, 0, W, H);
+
+  for (const p of portals) {
+    const cfg = PORTAL_TYPES[p.type];
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 50);
+    g.addColorStop(0, cfg.core.replace('1)', '0.35)'));
+    g.addColorStop(1, cfg.core.replace('1)', '0)'));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 50, 0, Math.PI * 2); ctx.fill();
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.angle);
+    ctx.strokeStyle = cfg.core.replace('1)', '0.5)');
+    ctx.lineWidth = 2;
+    for (let ring = 0; ring < 3; ring++) {
+      ctx.globalAlpha = 0.5 - ring * 0.13;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 26 - ring * 6, 12 - ring * 2, 0, 0, Math.PI * 1.5);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    ctx.fillStyle = cfg.core;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const b of portalBits) {
+    const ratio = b.life / b.maxLife;
+    const alpha = Math.sin(Math.PI * (1 - ratio)) * 0.8;
+    const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.size);
+    g.addColorStop(0, `hsla(${b.hue}, 90%, 68%, ${alpha})`);
+    g.addColorStop(1, `hsla(${b.hue}, 90%, 68%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+let rainDrops = [];
+let splashes = [];
+const MAX_DROPS = 170;
+const bokeh = Array.from({ length: 6 }, () => ({
+  xf: Math.random(), yf: 0.1 + Math.random() * 0.55, r: 40 + Math.random() * 70,
+  hue: [40, 200, 280, 25][Math.floor(Math.random() * 4)], phase: Math.random() * Math.PI * 2,
+}));
+let rainWipe = { x: -1000, y: -1000, active: false };
+
+function spawnDrop() {
+  if (rainDrops.length >= MAX_DROPS) return;
+  rainDrops.push({ x: Math.random() * W, y: -10, vy: 1 + Math.random() * 1.5, vx: 0, r: 2 + Math.random() * 3, trail: 0 });
+}
+
+function updateRain() {
+  if (Math.random() < 0.55) spawnDrop();
+  for (let i = rainDrops.length - 1; i >= 0; i--) {
+    const d = rainDrops[i];
+    if (rainWipe.active) {
+      const dx = d.x - rainWipe.x, dy = d.y - rainWipe.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 55) { d.vy += 1.4; d.vx += dx * 0.01; d.trail = 1; }
+    }
+    d.vy += 0.05;
+    d.vx *= 0.94;
+    d.x += d.vx; d.y += d.vy * (0.5 + d.r * 0.15);
+    d.trail *= 0.9;
+
+    for (let j = i - 1; j >= 0; j--) {
+      const o = rainDrops[j];
+      const dx = d.x - o.x, dy = d.y - o.y;
+      if (Math.hypot(dx, dy) < (d.r + o.r) * 0.6) {
+        const big = d.r >= o.r ? d : o, small = d.r >= o.r ? o : d;
+        big.r = Math.min(9, Math.cbrt(big.r ** 3 + small.r ** 3));
+        big.vy = Math.max(big.vy, small.vy);
+        const removeIdx = big === d ? j : i;
+        rainDrops.splice(removeIdx, 1);
+        break;
+      }
+    }
+    if (d.y - d.r > H) {
+      splashes.push({ x: d.x, y: H - 2, r: 2, maxR: 8 + d.r * 2, life: 0 });
+      rainDrops.splice(i, 1);
+    }
+  }
+  for (let i = splashes.length - 1; i >= 0; i--) {
+    const s = splashes[i];
+    s.life++; s.r += (s.maxR - s.r) * 0.25;
+    if (s.life > 16) splashes.splice(i, 1);
+  }
+  rainWipe.active = false;
+}
+
+function drawRain(now) {
+  ctx.globalCompositeOperation = 'source-over';
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#0b1420');
+  bgGrad.addColorStop(1, '#050a10');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  for (const b of bokeh) {
+    const cx = b.xf * W + Math.sin(now * 0.0002 + b.phase) * 14;
+    const cy = b.yf * H + Math.cos(now * 0.00015 + b.phase) * 10;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, b.r);
+    g.addColorStop(0, `hsla(${b.hue}, 80%, 65%, 0.16)`);
+    g.addColorStop(1, `hsla(${b.hue}, 80%, 65%, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  for (const d of rainDrops) {
+    if (d.trail > 0.15) {
+      ctx.strokeStyle = `rgba(180,210,230,${0.25 * d.trail})`;
+      ctx.lineWidth = d.r * 0.7;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y - d.vy * 3);
+      ctx.lineTo(d.x, d.y - d.r);
+      ctx.stroke();
+    }
+    const g = ctx.createRadialGradient(d.x - d.r * 0.3, d.y - d.r * 0.3, 0, d.x, d.y, d.r * 1.6);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.4, 'rgba(190,215,230,0.28)');
+    g.addColorStop(1, 'rgba(190,215,230,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r * 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.arc(d.x - d.r * 0.3, d.y - d.r * 0.3, d.r * 0.28, 0, Math.PI * 2); ctx.fill();
+  }
+
+  for (const s of splashes) {
+    const alpha = Math.max(0, 1 - s.life / 16);
+    ctx.strokeStyle = `rgba(200,225,240,${alpha * 0.5})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.ellipse(s.x, s.y, s.r, s.r * 0.35, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+function updateUniverse() {
+  for (let i = uniWells.length - 1; i >= 0; i--) {
+    uniWells[i].pulse *= 0.9;
+  }
+  for (let i = uniStars.length - 1; i >= 0; i--) {
+    const s = uniStars[i];
+    s.life++;
+    let consumed = false;
+    for (const w of uniWells) {
+      const dx = w.x - s.x, dy = w.y - s.y;
+      const distSq = dx * dx + dy * dy;
+      const dist = Math.sqrt(distSq);
+      if (dist < 12) { consumed = true; w.pulse = 1; break; }
+      const force = w.strength / Math.max(distSq, 400);
+      s.vx += (force * dx) / dist + (force * -dy * 0.55) / dist;
+      s.vy += (force * dy) / dist + (force * dx * 0.55) / dist;
+    }
+    if (consumed || s.life > s.maxLife) { uniStars.splice(i, 1); continue; }
+    s.vx *= 0.992; s.vy *= 0.992;
+    s.x += s.vx; s.y += s.vy;
+  }
+  if (Math.random() < 0.006) spawnShootingStar();
+  for (let i = uniShooting.length - 1; i >= 0; i--) {
+    const sh = uniShooting[i];
+    sh.life++; sh.x += sh.vx; sh.y += sh.vy;
+    if (sh.life > sh.maxLife || sh.x > W + 40 || sh.y > H + 40) uniShooting.splice(i, 1);
+  }
+}
+
+function drawUniverse(now) {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#05030f';
+  ctx.fillRect(0, 0, W, H);
+
+  for (const n of nebulae) {
+    const cx = n.xf * W + Math.sin(now * 0.00006 * n.driftSpeed + n.phase) * 30;
+    const cy = n.yf * H + Math.cos(now * 0.00005 * n.driftSpeed + n.phase) * 24;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, n.r);
+    g.addColorStop(0, `hsla(${n.hue}, 60%, 45%, 0.05)`);
+    g.addColorStop(1, `hsla(${n.hue}, 60%, 45%, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  for (const b of bgStars) {
+    const tw = 0.35 + Math.sin(now * 0.0012 * b.speed + b.phase) * 0.35 + 0.3;
+    ctx.fillStyle = `rgba(255,255,255,${Math.max(0, tw * 0.6)})`;
+    ctx.beginPath();
+    ctx.arc(b.xf * W, b.yf * H, b.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const w of uniWells) {
+    const age = now - w.born;
+    const g1 = ctx.createRadialGradient(w.x, w.y, 0, w.x, w.y, 46 + w.pulse * 20);
+    g1.addColorStop(0, `rgba(180,140,255,${0.22 + w.pulse * 0.3})`);
+    g1.addColorStop(1, 'rgba(180,140,255,0)');
+    ctx.fillStyle = g1;
+    ctx.beginPath(); ctx.arc(w.x, w.y, 46 + w.pulse * 20, 0, Math.PI * 2); ctx.fill();
+
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    ctx.rotate(age * 0.0009);
+    ctx.strokeStyle = 'rgba(200,170,255,0.35)';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 1.6); ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = '#05030f';
+    ctx.beginPath(); ctx.arc(w.x, w.y, 10, 0, Math.PI * 2); ctx.fill();
+  }
+
+  const bright = uniStars.filter((s) => s.bright);
+  ctx.strokeStyle = 'rgba(200,220,255,1)';
+  for (let i = 0; i < bright.length; i++) {
+    for (let j = i + 1; j < bright.length; j++) {
+      const dx = bright[i].x - bright[j].x, dy = bright[i].y - bright[j].y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 120) {
+        ctx.globalAlpha = (1 - dist / 120) * 0.15;
+        ctx.beginPath();
+        ctx.moveTo(bright[i].x, bright[i].y);
+        ctx.lineTo(bright[j].x, bright[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of uniStars) {
+    const tw = 0.75 + Math.sin(now * 0.006 + s.twinkle) * 0.25;
+    const r = s.size * tw;
+    const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * (s.bright ? 4 : 2.4));
+    g.addColorStop(0, `hsla(${s.hue}, 85%, 80%, ${s.bright ? 0.9 : 0.6})`);
+    g.addColorStop(1, `hsla(${s.hue}, 85%, 80%, 0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r * (s.bright ? 4 : 2.4), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const sh of uniShooting) {
+    const ratio = sh.life / sh.maxLife;
+    const alpha = Math.sin(Math.PI * (1 - ratio));
+    const tailX = sh.x - sh.vx * 6, tailY = sh.y - sh.vy * 6;
+    const grad = ctx.createLinearGradient(sh.x, sh.y, tailX, tailY);
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sh.x, sh.y); ctx.lineTo(tailX, tailY); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function spawn(x, y, vx, vy) {
+  const p = PALETTES[mode];
+  const hue = p.hues[Math.floor(Math.random() * p.hues.length)] + (Math.random() * 14 - 7);
+  const light = p.light[0] + Math.random() * (p.light[1] - p.light[0]);
+  const size = p.size[0] + Math.random() * (p.size[1] - p.size[0]);
+  particles.push({
+    x, y,
+    vx: vx * (0.3 + Math.random() * 0.5) + (Math.random() - 0.5) * p.spread,
+    vy: vy * (0.3 + Math.random() * 0.5) + (Math.random() - 0.5) * p.spread,
+    life: 0, maxLife: p.life * (0.7 + Math.random() * 0.6),
+    size, hue, sat: p.sat, light, mode,
+  });
+  if (particles.length > MAX_PARTICLES) particles.splice(0, particles.length - MAX_PARTICLES);
+}
+
+function emitTrail(x, y) {
+  const dx = x - pointer.px, dy = y - pointer.py;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.max(1, Math.min(8, Math.floor(dist / 6)));
+  for (let i = 0; i < steps; i++) {
+    const t = i / steps;
+    const ix = pointer.px + dx * t;
+    const iy = pointer.py + dy * t;
+    const count = mode === 'fire' || mode === 'neon' ? 2 : 3;
+    for (let j = 0; j < count; j++) {
+      spawn(ix + (Math.random()-0.5)*6, iy + (Math.random()-0.5)*6, dx * 0.06, dy * 0.06);
+    }
+  }
+}
+
+function setPointer(x, y) {
+  pointer.px = pointer.x; pointer.py = pointer.y;
+  pointer.x = x; pointer.y = y;
+  if (mode === 'universe') emitUniStars(x, y);
+  else if (mode === 'rain') { rainWipe.x = x; rainWipe.y = y; rainWipe.active = true; }
+  else if (mode !== 'portal') emitTrail(x, y);
+  if (hintShown) {
+    hintShown = false;
+    document.getElementById('hint').style.opacity = '0';
+  }
+}
+
+let longPressTimer = null;
+let pointerMoved = false;
+let downX = 0, downY = 0;
+
+canvas.addEventListener('pointerdown', (e) => {
+  pointer.down = true;
+  pointer.x = pointer.px = e.clientX;
+  pointer.y = pointer.py = e.clientY;
+  pointerMoved = false;
+  downX = e.clientX; downY = e.clientY;
+  if (mode === 'universe') {
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => { if (!pointerMoved) placeWell(downX, downY); }, 420);
+  }
+  if (mode === 'portal') placePortal(downX, downY, currentPortalType);
+  setPointer(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 8) pointerMoved = true;
+  if (e.pressure === 0 && e.pointerType === 'mouse' && !pointer.down) {
+    setPointer(e.clientX, e.clientY);
+    return;
+  }
+  setPointer(e.clientX, e.clientY);
+});
+window.addEventListener('pointerup', () => { pointer.down = false; clearTimeout(longPressTimer); });
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    mode = btn.dataset.mode;
+    document.getElementById('portalTypes').classList.toggle('show', mode === 'portal');
+  });
+});
+
+document.querySelectorAll('.ptype-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ptype-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPortalType = btn.dataset.ptype;
+  });
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  particles = [];
+  uniStars = []; uniWells = []; uniShooting = [];
+  portals = []; portalBits = [];
+  rainDrops = []; splashes = [];
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = mode === 'universe' ? '#05030f' : (mode === 'portal' ? '#06040e' : (mode === 'rain' ? '#0b1420' : '#060608'));
+  ctx.fillRect(0, 0, W, H);
+});
+
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = 'drift-' + Date.now() + '.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+ctx.fillStyle = '#060608';
+ctx.fillRect(0, 0, W, H);
+
+function frame() {
+  const now = performance.now();
+
+  if (mode === 'universe') {
+    updateUniverse();
+    drawUniverse(now);
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (mode === 'portal') {
+    updatePortals();
+    drawPortals();
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (mode === 'rain') {
+    updateRain();
+    drawRain(now);
+    requestAnimationFrame(frame);
+    return;
+  }
+
+  const p = PALETTES[mode];
+  ctx.fillStyle = PALETTES.ink.trail;
+  let maxTrail = 0.06;
+  ['ink','fire','neon','water'].forEach(m => { maxTrail = Math.max(maxTrail, parseFloat(PALETTES[m].trail.match(/[\d.]+\)/)[0])); });
+  ctx.fillStyle = `rgba(6,6,8,${Math.max(0.07, maxTrail * 0.75)})`;
+  ctx.fillRect(0, 0, W, H);
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    const pal = PALETTES[pt.mode] || p;
+    pt.life++;
+    if (pt.life > pt.maxLife) { particles.splice(i, 1); continue; }
+    pt.vy += pal.gravity * 0.06;
+    pt.vx *= pal.drag; pt.vy *= pal.drag;
+    pt.x += pt.vx; pt.y += pt.vy;
+
+    const lifeRatio = pt.life / pt.maxLife;
+    const alpha = Math.sin(Math.PI * (1 - lifeRatio)) * 0.85;
+    const r = pt.size * (0.5 + (1 - lifeRatio) * 0.7);
+
+    ctx.globalCompositeOperation = pal.additive ? 'lighter' : 'source-over';
+    const grad = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, r);
+    grad.addColorStop(0, `hsla(${pt.hue}, ${pt.sat}%, ${pt.light}%, ${alpha})`);
+    grad.addColorStop(1, `hsla(${pt.hue}, ${pt.sat}%, ${pt.light}%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+let driftT = 0;
+setInterval(() => {
+  driftT += 0.02;
+  if (!pointer.down && Math.random() < 0.02) {
+    const x = W/2 + Math.cos(driftT) * 60;
+    const y = H/2 + Math.sin(driftT * 1.3) * 40;
+  }
+}, 50);
+</script>
+</body>
+</html>
